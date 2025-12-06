@@ -1,8 +1,21 @@
 #include "utils.h"
 
-//----------------------------------------------------
-// read_png (your version)
-//----------------------------------------------------
+Image* createImage(unsigned width, unsigned height, unsigned channels) {
+    Image* img = (Image*)malloc(sizeof(Image));
+    img->width = width;
+    img->height = height;
+    img->channels = channels;
+    img->data = (unsigned char*)malloc(width * height * channels);
+    return img;
+}
+
+void freeImage(Image* img) {
+    if (!img) return;
+    if (img->data) free(img->data);
+    free(img);
+}
+
+// read_png
 int read_png(const char* filename, unsigned char** image,
              unsigned* height, unsigned* width, unsigned* channels)
 {
@@ -37,9 +50,7 @@ int read_png(const char* filename, unsigned char** image,
     return 0;
 }
 
-//----------------------------------------------------
-// write_png (your version)
-//----------------------------------------------------
+// write_png
 void write_png(const char* filename, png_bytep image,
                const unsigned height, const unsigned width, const unsigned channels)
 {

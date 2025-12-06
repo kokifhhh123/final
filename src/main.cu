@@ -1,130 +1,113 @@
 #include <iostream>
-#include <vector>
-#include <cmath>
 #include <cstdlib>
 #include <ctime>
-#include <limits>
-#include "utils.h"
+#include <cstring>
+#include <png.h>
+#include <chrono>      // CPU timing
+#include <cuda_runtime.h>  // CUDA timing
 
-//----------------------------------------------------
-// Pixel struct and distance
-//----------------------------------------------------
-struct Pixel {
-    float r, g, b;
-};
+#include "imp.h"
 
-float distance2(const Pixel &a, const Pixel &b) {
-    float dr = a.r - b.r;
-    float dg = a.g - b.g;
-    float db = a.b - b.b;
-    return dr*dr + dg*dg + db*db;
+// ------------ CPU timer helper ------------
+double now() {
+    return std::chrono::duration<double>(
+        std::chrono::high_resolution_clock::now().time_since_epoch()
+    ).count();
 }
 
-//----------------------------------------------------
-// Main: K-means color quantization
-//----------------------------------------------------
-int main(int argc, char** argv) {
-    if (argc < 4) {
-        std::cout << "Usage: ./kmeans_seq_png input.png output.png K\n";
-        return 0;
+// ------------ CUDA timer helper ------------
+float cuda_time_ms(void (*func)(Image*, Image*, int, int),
+                   Image* src, Image* dst,
+                   int K, int max_iters)
+{
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
+    cudaEventRecord(start);
+    func(src, dst, K, max_iters);   // call CUDA version
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+
+    float ms = 0.0f;
+    cudaEventElapsedTime(&ms, stop, start);
+
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
+    return ms;
+}
+
+int main(int argc, char* argv[]) {
+    // ./kmeans input.png output.png mode K [max_iters]
+    if (argc != 5 && argc != 6) {
+        std::cout << "Usage: ./kmeans input.png output.png "
+                     "(seq|omp|cuda|cuda_opt) K [max_iters]\n";
+        return 1;
     }
 
     const char* input_path  = argv[1];
     const char* output_path = argv[2];
-    int K = std::atoi(argv[3]);
+    const char* mode        = argv[3];
+    int K = std::atoi(argv[4]);
+    int max_iters = (argc == 6) ? std::atoi(argv[5]) : 20;
 
+    unsigned char* buffer = nullptr;
     unsigned width, height, channels;
-    unsigned char* img = nullptr;
 
-    if (read_png(input_path, &img, &height, &width, &channels) != 0) {
-        std::cout << "Failed to load PNG.\n";
-        return 0;
+    if (read_png(input_path, &buffer, &height, &width, &channels) != 0) {
+        std::cerr << "Failed to read input PNG.\n";
+        return 1;
     }
 
-    if (channels < 3) {
-        std::cout << "Image must be RGB or RGBA.\n";
-        return 0;
+    Image* src = createImage(width, height, channels);
+    Image* dst = createImage(width, height, channels);
+
+    std::memcpy(src->data, buffer, width * height * channels);
+    std::memcpy(dst->data, buffer, width * height * channels);
+    free(buffer);
+
+    double t0, t1;
+    float cuda_ms;
+
+    if (std::strcmp(mode, "seq") == 0) {
+
+        t0 = now();
+        kmeans_seq(src, dst, K, max_iters);
+        t1 = now();
+        std::cout << "[SEQ] time = " << (t1 - t0) << " sec\n";
+
+    }
+    else if (std::strcmp(mode, "omp") == 0) {
+
+        t0 = now();
+        kmeans_omp(src, dst, K, max_iters);
+        t1 = now();
+        std::cout << "[OMP] time = " << (t1 - t0) << " sec\n";
+
+    }
+    else if (std::strcmp(mode, "cuda") == 0) {
+
+        cuda_ms = cuda_time_ms(kmeans_cuda, src, dst, K, max_iters);
+        std::cout << "[CUDA] time = " << cuda_ms / 1000.0f << " sec\n";
+
+    }
+    else if (std::strcmp(mode, "cuda_opt") == 0) {
+
+        cuda_ms = cuda_time_ms(kmeans_cuda_opt, src, dst, K, max_iters);
+        std::cout << "[CUDA_OPT] time = " << cuda_ms / 1000.0f << " sec\n";
+
+    }
+    else {
+        std::cerr << "Invalid mode: " << mode
+                  << " (expected seq|omp|cuda|cuda_opt)\n";
+        freeImage(src);
+        freeImage(dst);
+        return 1;
     }
 
-    size_t N = width * height;
-    std::vector<Pixel> pixels(N);
+    write_png(output_path, dst->data, height, width, channels);
 
-    // convert to Pixel struct (ignore alpha channel if exists)
-    for (size_t i = 0; i < N; i++) {
-        pixels[i].r = img[i*channels + 0];
-        pixels[i].g = img[i*channels + 1];
-        pixels[i].b = img[i*channels + 2];
-    }
-
-    // initialize centroids randomly
-    std::srand(std::time(nullptr));
-    std::vector<Pixel> centroids(K);
-    for (int k = 0; k < K; k++) {
-        int idx = std::rand() % N;
-        centroids[k] = pixels[idx];
-    }
-
-    std::vector<int> assignments(N, 0);
-    std::vector<Pixel> new_centroids(K);
-    std::vector<int> counts(K);
-
-    int max_iters = 20;
-
-    for (int iter = 0; iter < max_iters; ++iter) {
-        // assign each pixel to nearest centroid
-        for (size_t i = 0; i < N; i++) {
-            float best_dist = std::numeric_limits<float>::max();
-            int best_k = 0;
-
-            for (int k = 0; k < K; k++) {
-                float d = distance2(pixels[i], centroids[k]);
-                if (d < best_dist) {
-                    best_dist = d;
-                    best_k = k;
-                }
-            }
-
-            assignments[i] = best_k;
-        }
-
-        // reset accumulators
-        for (int k = 0; k < K; k++) {
-            new_centroids[k] = {0,0,0};
-            counts[k] = 0;
-        }
-
-        // update centroids
-        for (size_t i = 0; i < N; i++) {
-            int k = assignments[i];
-            new_centroids[k].r += pixels[i].r;
-            new_centroids[k].g += pixels[i].g;
-            new_centroids[k].b += pixels[i].b;
-            counts[k]++;
-        }
-
-        for (int k = 0; k < K; k++) {
-            if (counts[k] > 0) {
-                centroids[k].r = new_centroids[k].r / counts[k];
-                centroids[k].g = new_centroids[k].g / counts[k];
-                centroids[k].b = new_centroids[k].b / counts[k];
-            }
-        }
-
-        std::cout << "Iteration " << iter + 1 << "/" << max_iters << " done.\n";
-    }
-
-    // write quantized image
-    for (size_t i = 0; i < N; i++) {
-        int k = assignments[i];
-        img[i*channels + 0] = (unsigned char)centroids[k].r;
-        img[i*channels + 1] = (unsigned char)centroids[k].g;
-        img[i*channels + 2] = (unsigned char)centroids[k].b;
-    }
-
-    write_png(output_path, img, height, width, channels);
-
-    free(img);
-
-    std::cout << "Saved output: " << output_path << "\n";
+    freeImage(src);
+    freeImage(dst);
     return 0;
 }
