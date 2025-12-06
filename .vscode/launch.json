@@ -1,0 +1,29 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "Debug with argv",
+        "type": "cppdbg",
+        "request": "launch",
+        "program": "${workspaceFolder}/HW3/bin/hw3",
+        "args": ["/home/koki/2025F/PDA/HW3/HW3/testcase/public1.lef", "/home/koki/2025F/PDA/HW3/HW3/testcase/public1.def", "/home/koki/2025F/PDA/HW3/HW3/output/public1.def"],
+        // "args": ["/home/koki/2025F/PDA/HW3/HW3/testcase/public2.lef", "/home/koki/2025F/PDA/HW3/HW3/testcase/public2.def", "/home/koki/2025F/PDA/HW3/HW3/output/public2.def"],
+        // "args": ["/home/koki/2025F/PDA/HW3/HW3/testcase/public3.lef", "/home/koki/2025F/PDA/HW3/HW3/testcase/public3.def", "/home/koki/2025F/PDA/HW3/HW3/output/public3.def"],
+        // "args": ["/home/koki/2025F/PDA/HW3/HW3/testcase/public4.lef", "/home/koki/2025F/PDA/HW3/HW3/testcase/public4.def", "/home/koki/2025F/PDA/HW3/HW3/output/public4.def"],
+        "stopAtEntry": false,
+        "cwd": "${workspaceFolder}",
+        "environment": [],
+        "externalConsole": false,
+        "MIMode": "gdb",
+        "miDebuggerPath": "/usr/bin/gdb",
+        "setupCommands": [
+          {
+            "description": "Enable pretty-printing for gdb",
+            "text": "-enable-pretty-printing",
+            "ignoreFailures": true
+          }
+        ],
+        "preLaunchTask": "build"
+      }
+    ]
+  }
