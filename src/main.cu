@@ -5,8 +5,7 @@
 #include <png.h>
 #include <chrono>      // CPU timing
 #include <cuda_runtime.h>  // CUDA timing
-
-#include "imp.h"
+#include "heds/imp.h"
 
 // ------------ CPU timer helper ------------
 double now() {
@@ -15,29 +14,6 @@ double now() {
     ).count();
 }
 
-// ------------ CUDA timer helper ------------
-float cuda_time_ms(void (*func)(Image*, Image*, int, int),
-                   Image* src, Image* dst,
-                   int K, int max_iters)
-{
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-
-    cudaEventRecord(start);
-    func(src, dst, K, max_iters);   // call CUDA version
-    cudaDeviceSynchronize();
-
-    cudaEventRecord(stop);
-    cudaEventSynchronize(stop);
-
-    float ms = 0.0f;
-    cudaEventElapsedTime(&ms, stop, start);
-
-    cudaEventDestroy(start);
-    cudaEventDestroy(stop);
-    return ms;
-}
 
 int main(int argc, char* argv[]) {
     // ./kmeans input.png output.png mode K [max_iters]
@@ -87,12 +63,6 @@ int main(int argc, char* argv[]) {
         std::cout << "[OMP] time = " << (t1 - t0) << " sec\n";
 
     }
-    // else if (std::strcmp(mode, "cuda") == 0) {
-
-    //     cuda_ms = cuda_time_ms(kmeans_cuda, src, dst, K, max_iters);
-    //     std::cout << "[CUDA] time = " << cuda_ms / 1000.0f << " sec\n";
-
-    // }
     else if (strcmp(mode, "cuda") == 0) {
         cudaEvent_t start, stop;
         cudaEventCreate(&start);
@@ -110,10 +80,72 @@ int main(int argc, char* argv[]) {
         std::cout << "[CUDA] time = " << cuda_ms / 1000.0f << " sec\n";
     }
     else if (std::strcmp(mode, "cuda_opt") == 0) {
+        cudaEvent_t start, stop;
+        cudaEventCreate(&start);
+        cudaEventCreate(&stop);
 
-        cuda_ms = cuda_time_ms(kmeans_cuda_opt, src, dst, K, max_iters);
-        std::cout << "[CUDA_OPT] time = " << cuda_ms / 1000.0f << " sec\n";
+        cudaEventRecord(start);
+        kmeans_cuda_opt(src, dst, K, max_iters);
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
 
+        float ms = 0.0f;
+        cudaEventElapsedTime(&ms, start, stop);
+        std::cout << "[CUDA_OPT] time = " << ms / 1000.0f << " sec\n";
+
+        cudaEventDestroy(start);
+        cudaEventDestroy(stop);
+    }
+    else if (std::strcmp(mode, "cuda_opt_more") == 0) {
+        cudaEvent_t start, stop;
+        cudaEventCreate(&start);
+        cudaEventCreate(&stop);
+
+        cudaEventRecord(start);
+        kmeans_cuda_opt_more(src, dst, K, max_iters);
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+
+        float ms = 0.0f;
+        cudaEventElapsedTime(&ms, start, stop);
+        std::cout << "[CUDA_OPT] time = " << ms / 1000.0f << " sec\n";
+
+        cudaEventDestroy(start);
+        cudaEventDestroy(stop);
+    }
+    else if (std::strcmp(mode, "cuda_opt_warp") == 0) {
+        cudaEvent_t start, stop;
+        cudaEventCreate(&start);
+        cudaEventCreate(&stop);
+
+        cudaEventRecord(start);
+        kmeans_cuda_warp(src, dst, K, max_iters);
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+
+        float ms = 0.0f;
+        cudaEventElapsedTime(&ms, start, stop);
+        std::cout << "[CUDA_OPT] time = " << ms / 1000.0f << " sec\n";
+
+        cudaEventDestroy(start);
+        cudaEventDestroy(stop);
+    }
+    else if (std::strcmp(mode, "cuda_opt_soa") == 0) {
+        cudaEvent_t start, stop;
+        cudaEventCreate(&start);
+        cudaEventCreate(&stop);
+
+        cudaEventRecord(start);
+        kmeans_cuda_opt_more_soa(src, dst, K, max_iters);
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+
+        float ms = 0.0f;
+        cudaEventElapsedTime(&ms, start, stop);
+        std::cout << "[CUDA_OPT] time = " << ms / 1000.0f << " sec\n";
+
+        cudaEventDestroy(start);
+        cudaEventDestroy(stop);
     }
     else {
         std::cerr << "Invalid mode: " << mode

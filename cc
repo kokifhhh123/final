@@ -24,7 +24,22 @@ srun -p nvidia -N1 -n1 --gres=gpu:1 ../bin/main ../testcase/building.png ../outp
 
 srun -p nvidia -N1 -n1 --gres=gpu:1 ../bin/main ../testcase/building.png ../output/building_cuda.png cuda 3
 
-srun -p nvidia -N1 -n1 --gres=gpu:1 ../bin/main ../testcase/building.png ../output/building_cuda.png cuda 128
+srun -p nvidia -N1 -n1 --gres=gpu:1 ../bin/main ../testcase/building.png ../output/building_cuda_128.png cuda 128
+
+
+srun -p nvidia -N1 -n1 --gres=gpu:1 ../bin/main ../testcase/building.png ../output/building_cuda_opt.png cuda_opt 128
+srun -p nvidia -N1 -n1 --gres=gpu:1 ../bin/main ../testcase/flower.png ../output/flower_cuda_opt.png cuda_opt 128
+
+
+srun -p nvidia -N1 -n1 --gres=gpu:1 ../bin/main ../testcase/building.png ../output/building_cuda_opt.png cuda_opt_more 128
+srun -p nvidia -N1 -n1 --gres=gpu:1 ../bin/main ../testcase/flower.png ../output/flower_cuda_opt.png cuda_opt_more 16
+
+
+srun -p nvidia -N1 -n1 --gres=gpu:1 ../bin/main ../testcase/building.png ../output/building_cuda_warp.png cuda_opt_warp 128
+srun -p nvidia -N1 -n1 --gres=gpu:1 ../bin/main ../testcase/flower.png ../output/flower_cuda_warp.png cuda_opt_warp 16
+
+
+srun -p nvidia -N1 -n1 --gres=gpu:1 ../bin/main ../testcase/flower.png ../output/flower_cuda_soa.png cuda_opt_soa 16
 
 slic
 1. sequential
@@ -32,4 +47,6 @@ slic
 
 
 
+
 ./kmeans input.png output.png mode K max_iters
+

@@ -1,4 +1,4 @@
-#include "utils.h"
+#include "heds/utils.h"
 
 Image* createImage(unsigned width, unsigned height, unsigned channels) {
     Image* img = (Image*)malloc(sizeof(Image));
