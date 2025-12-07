@@ -133,23 +133,23 @@ int main(int argc, char* argv[]) {
             cudaEventDestroy(start);
             cudaEventDestroy(stop);
         }
-        else if (std::strcmp(mode, "cuda_opt_soa") == 0) {
-            cudaEvent_t start, stop;
-            cudaEventCreate(&start);
-            cudaEventCreate(&stop);
+        // else if (std::strcmp(mode, "cuda_opt_soa") == 0) {
+        //     cudaEvent_t start, stop;
+        //     cudaEventCreate(&start);
+        //     cudaEventCreate(&stop);
 
-            cudaEventRecord(start);
-            kmeans_cuda_opt_more_soa(src, dst, K, max_iters);
-            cudaEventRecord(stop);
-            cudaEventSynchronize(stop);
+        //     cudaEventRecord(start);
+        //     kmeans_cuda_opt_more_soa(src, dst, K, max_iters);
+        //     cudaEventRecord(stop);
+        //     cudaEventSynchronize(stop);
 
-            float ms = 0.0f;
-            cudaEventElapsedTime(&ms, start, stop);
-            std::cout << "[CUDA_OPT] time = " << ms / 1000.0f << " sec\n";
+        //     float ms = 0.0f;
+        //     cudaEventElapsedTime(&ms, start, stop);
+        //     std::cout << "[CUDA_OPT] time = " << ms / 1000.0f << " sec\n";
 
-            cudaEventDestroy(start);
-            cudaEventDestroy(stop);
-        }
+        //     cudaEventDestroy(start);
+        //     cudaEventDestroy(stop);
+        // }
         else {
             std::cerr << "Invalid mode: " << mode
                     << " (expected seq|omp|cuda|cuda_opt)\n";
@@ -164,6 +164,48 @@ int main(int argc, char* argv[]) {
             slic_seq(src, dst, K, max_iters);
             t1 = now();
             std::cout << "[SLIC-SEQ] time = " << (t1 - t0) << " sec\n";
+        }
+        else if (std::strcmp(mode, "omp") == 0) {
+            
+            t0 = now();
+            std::cout << "hello" << std::endl;
+            slic_omp(src, dst, K, max_iters);
+            t1 = now();
+            std::cout << "[slic-OMP] time = " << (t1 - t0) << " sec\n";
+        }
+        else if (std::strcmp(mode, "cuda") == 0) {
+            cudaEvent_t start, stop;
+            cudaEventCreate(&start);
+            cudaEventCreate(&stop);
+
+            cudaEventRecord(start);
+            slic_cuda(src, dst, K, max_iters);
+            cudaEventRecord(stop);
+            cudaEventSynchronize(stop);
+
+            float ms = 0.0f;
+            cudaEventElapsedTime(&ms, start, stop);
+            std::cout << "[CUDA_OPT] time = " << ms / 1000.0f << " sec\n";
+
+            cudaEventDestroy(start);
+            cudaEventDestroy(stop);
+        }
+        else if (std::strcmp(mode, "cudaopt") == 0) {
+            cudaEvent_t start, stop;
+            cudaEventCreate(&start);
+            cudaEventCreate(&stop);
+
+            cudaEventRecord(start);
+            slic_cuda_opt(src, dst, K, max_iters);
+            cudaEventRecord(stop);
+            cudaEventSynchronize(stop);
+
+            float ms = 0.0f;
+            cudaEventElapsedTime(&ms, start, stop);
+            std::cout << "[CUDA_OPT] time = " << ms / 1000.0f << " sec\n";
+
+            cudaEventDestroy(start);
+            cudaEventDestroy(stop);
         }
     }
     

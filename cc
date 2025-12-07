@@ -52,4 +52,14 @@ slic
 
 algo kmeans/slic
 
-srun -p nvidia -N1 -n1 --gres=gpu:1 ../bin/main ../testcase/flower.png ../output/flower_slic.png slic seq 1500
+srun -p nvidia -N1 -n1 --gres=gpu:1 ../bin/main ../testcase/flower.png ../output/flower_slic_seq.png slic seq 10000
+
+srun -p nvidia -N1 -n1 --gres=gpu:1 ../bin/main ../testcase/flower.png ../output/flower_slic_omp.png slic omp 10000
+
+srun -p nvidia -N1 -n1 --gres=gpu:1 ../bin/main ../testcase/flower.png ../output/flower_slic_cuda.png slic cuda 10000
+
+srun -p nvidia -N1 -n1 --gres=gpu:1 ../bin/main ../testcase/building.png ../output/building_slic_cuda.png slic cuda 10000
+
+
+srun -p nvidia -N1 -n1 --gres=gpu:1 ../bin/main ../testcase/building.png ../output/building_slic_cudaopt.png slic cudaopt 10000
+srun -p nvidia -N1 -n1 --gres=gpu:1 ../bin/main ../testcase/flower.png ../output/flower_slic_cudaopt.png slic cudaopt 10000
