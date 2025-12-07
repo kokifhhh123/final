@@ -14,7 +14,14 @@ k-means
 
 srun -p nvidia -N1 -n1 --gres=gpu:1 ../bin/main /home/pp25/pp25s051/final/testcase/building.png /home/pp25/pp25s051/final/output/building.png seq 36
 
-srun -p nvidia -N1 -n1 --gres=gpu:1 ../bin/main /home/pp25/pp25s051/final/testcase/building.png /home/pp25/pp25s051/final/output/building.png seq 36
+
+
+srun -p nvidia -N1 -n1 --gres=gpu:1 ../bin/main ../testcase/building.png ../output/building.png seq 128
+
+
+srun -p nvidia -N1 -n1 --gres=gpu:1 ../bin/main ../testcase/building.png ../output/building_cuda.png cuda 3
+
+srun -p nvidia -N1 -n1 --gres=gpu:1 ../bin/main ../testcase/building.png ../output/building_cuda.png cuda 128
 
 slic
 1. sequential

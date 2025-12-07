@@ -1,2 +1,5 @@
 others/www/
 share/
+object/
+bin/
+*.o

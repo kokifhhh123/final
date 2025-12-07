@@ -1,5 +1,5 @@
 CXX = nvcc
-CXXFLAGS = -std=c++17 -O3
+CXXFLAGS = -std=c++17 -O3 -Xcompiler "-fopenmp"
 LDFLAGS = -lpng -lz
 
 SRC_DIR  = .
@@ -18,7 +18,6 @@ $(BIN): $(OBJS)
 	@mkdir -p $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
 
-# Compile .cu -> .o
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cu
 	@mkdir -p $(OBJ_DIR)
 	$(CXX) $(CXXFLAGS) -c $< -o $@

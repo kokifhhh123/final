@@ -26,6 +26,8 @@ float cuda_time_ms(void (*func)(Image*, Image*, int, int),
 
     cudaEventRecord(start);
     func(src, dst, K, max_iters);   // call CUDA version
+    cudaDeviceSynchronize();
+
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
 
@@ -85,11 +87,27 @@ int main(int argc, char* argv[]) {
         std::cout << "[OMP] time = " << (t1 - t0) << " sec\n";
 
     }
-    else if (std::strcmp(mode, "cuda") == 0) {
+    // else if (std::strcmp(mode, "cuda") == 0) {
 
-        cuda_ms = cuda_time_ms(kmeans_cuda, src, dst, K, max_iters);
+    //     cuda_ms = cuda_time_ms(kmeans_cuda, src, dst, K, max_iters);
+    //     std::cout << "[CUDA] time = " << cuda_ms / 1000.0f << " sec\n";
+
+    // }
+    else if (strcmp(mode, "cuda") == 0) {
+        cudaEvent_t start, stop;
+        cudaEventCreate(&start);
+        cudaEventCreate(&stop);
+
+        cudaEventRecord(start);
+        kmeans_cuda(src, dst, K, max_iters);
+        cudaEventRecord(stop);
+
+        cudaEventSynchronize(stop);
+        cudaEventElapsedTime(&cuda_ms, start, stop);
+
+        cudaEventDestroy(start);
+        cudaEventDestroy(stop);
         std::cout << "[CUDA] time = " << cuda_ms / 1000.0f << " sec\n";
-
     }
     else if (std::strcmp(mode, "cuda_opt") == 0) {
 
