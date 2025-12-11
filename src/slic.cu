@@ -194,18 +194,48 @@ void slic_seq(Image* src, Image* dst, int K, int max_iters)
         }
     }
 
-    for (size_t i = 0; i < N; ++i) {
-        int k = labels[i];
-        if (k != -1) {
-            dst->data[i*C + 0] = avgR[k];
-            dst->data[i*C + 1] = avgG[k];
-            dst->data[i*C + 2] = avgB[k];
-        } else {
-            dst->data[i*C + 0] = 0; 
-            dst->data[i*C + 1] = 0; 
-            dst->data[i*C + 2] = 0;
+    // 修改這裡：加入邊界檢查
+    for (int y = 0; y < H; ++y) {
+        for (int x = 0; x < W; ++x) {
+            size_t i = y * W + x;
+            int k = labels[i];
+            
+            bool is_border = false;
+            // 檢查右邊和下邊的鄰居 (或是檢查上下左右)
+            int dx[] = {1, 0};
+            int dy[] = {0, 1};
+
+            for (int d = 0; d < 2; ++d) {
+                int nx = x + dx[d];
+                int ny = y + dy[d];
+                if (nx < W && ny < H) {
+                    int nk = labels[ny * W + nx];
+                    if (k != -1 && nk != -1 && nk != k) {
+                        is_border = true;
+                        break;
+                    }
+                }
+            }
+
+            if (is_border) {
+                // 畫黑色邊框
+                dst->data[i*C + 0] = 0;
+                dst->data[i*C + 1] = 0;
+                dst->data[i*C + 2] = 0;
+            } else {
+                // 畫平均色
+                if (k != -1) {
+                    dst->data[i*C + 0] = avgR[k];
+                    dst->data[i*C + 1] = avgG[k];
+                    dst->data[i*C + 2] = avgB[k];
+                } else {
+                    dst->data[i*C + 0] = 0; 
+                    dst->data[i*C + 1] = 0; 
+                    dst->data[i*C + 2] = 0;
+                }
+            }
+            if (C == 4) dst->data[i*C + 3] = 255;
         }
-        if (C == 4) dst->data[i*C + 3] = 255;
     }
 }
 
@@ -428,17 +458,37 @@ void slic_omp(Image* src, Image* dst, int K, int max_iters)
         }
     }
 
+    // 修改這裡：加入邊界檢查 (OpenMP版)
     #pragma omp parallel for
-    for (int i = 0; i < (int)N; ++i) {
-        int k = labels[i];
-        if (k != -1) {
-            dst->data[i*C + 0] = avgR[k];
-            dst->data[i*C + 1] = avgG[k];
-            dst->data[i*C + 2] = avgB[k];
-        } else {
-            dst->data[i*C] = dst->data[i*C+1] = dst->data[i*C+2] = 0;
+    for (int y = 0; y < H; ++y) {
+        for (int x = 0; x < W; ++x) {
+            int i = y * W + x;
+            int k = labels[i];
+            
+            bool is_border = false;
+            // 簡單檢查右方與下方鄰居即可畫出邊界
+            if (x < W - 1) {
+                if (labels[i + 1] != k) is_border = true;
+            }
+            if (!is_border && y < H - 1) {
+                if (labels[i + W] != k) is_border = true;
+            }
+
+            if (is_border) {
+                dst->data[i*C + 0] = 0;
+                dst->data[i*C + 1] = 0;
+                dst->data[i*C + 2] = 0;
+            } else {
+                if (k != -1) {
+                    dst->data[i*C + 0] = avgR[k];
+                    dst->data[i*C + 1] = avgG[k];
+                    dst->data[i*C + 2] = avgB[k];
+                } else {
+                    dst->data[i*C] = dst->data[i*C+1] = dst->data[i*C+2] = 0;
+                }
+            }
+            if (C == 4) dst->data[i*C + 3] = 255;
         }
-        if (C == 4) dst->data[i*C + 3] = 255;
     }
 }
 
@@ -583,6 +633,81 @@ __global__ void k_assignment(const float* __restrict__ d_L,
     d_labels[idx] = best_k;
 }
 
+__global__ void k_assignment_opt(const float* __restrict__ d_L, 
+                                 const float* __restrict__ d_A, 
+                                 const float* __restrict__ d_B,
+                                 const float* __restrict__ cL,
+                                 const float* __restrict__ cA,
+                                 const float* __restrict__ cB,
+                                 const float* __restrict__ cX,
+                                 const float* __restrict__ cY,
+                                 const int* __restrict__ grid_to_k,
+                                 int* d_labels,
+                                 int W, int H, int grid_w, int grid_h,
+                                 float S, float m)
+{
+    // Use 2D blocks for better spatial locality (cache hits on texture/L2)
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (x >= W || y >= H) return;
+    int idx = y * W + x;
+
+    float l_val = d_L[idx];
+    float a_val = d_A[idx];
+    float b_val = d_B[idx];
+
+    int gx = x / (int)S;
+    int gy = y / (int)S;
+
+    float min_dist = 1e30f;
+    int best_k = -1;
+    
+    float inv_S2 = 1.0f / (S * S);
+    float m2 = m * m;
+    float factor = inv_S2 * m2;
+
+    // 3x3 search
+    #pragma unroll
+    for (int dy = -1; dy <= 1; ++dy) {
+        #pragma unroll
+        for (int dx = -1; dx <= 1; ++dx) {
+            int ngx = gx + dx;
+            int ngy = gy + dy;
+
+            if (ngx >= 0 && ngx < grid_w && ngy >= 0 && ngy < grid_h) {
+                // __ldg forces load through read-only cache (Texture cache)
+                int k = __ldg(&grid_to_k[ngy * grid_w + ngx]);
+                
+                if (k != -1) {
+                    float ck_L = __ldg(&cL[k]);
+                    float ck_A = __ldg(&cA[k]);
+                    float ck_B = __ldg(&cB[k]);
+                    float ck_X = __ldg(&cX[k]);
+                    float ck_Y = __ldg(&cY[k]);
+
+                    float dL = l_val - ck_L;
+                    float dA = a_val - ck_A;
+                    float dB = b_val - ck_B;
+                    float dcolor = dL*dL + dA*dA + dB*dB;
+
+                    float dX = (float)x - ck_X;
+                    float dY = (float)y - ck_Y;
+                    float dspace = dX*dX + dY*dY;
+
+                    float D = dcolor + dspace * factor;
+
+                    if (D < min_dist) {
+                        min_dist = D;
+                        best_k = k;
+                    }
+                }
+            }
+        }
+    }
+    d_labels[idx] = best_k;
+}
+
 // ---------------------------------------------------------
 // Kernel: Accumulate (使用 Atomic 加法，這是最安全的平行方式)
 // ---------------------------------------------------------
@@ -609,6 +734,77 @@ __global__ void k_accumulate(const float* __restrict__ d_L,
     atomicAdd(&accX[k], (float)x);
     atomicAdd(&accY[k], (float)y);
     atomicAdd(&accCount[k], 1);
+}
+
+__global__ void k_accumulate_opt(const float* __restrict__ d_L,
+                                 const float* __restrict__ d_A,
+                                 const float* __restrict__ d_B,
+                                 const int* __restrict__ d_labels,
+                                 float* accL, float* accA, float* accB,
+                                 float* accX, float* accY, int* accCount,
+                                 int W, int H, int Kactual)
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int idx = y * W + x;
+    
+    bool active = (x < W && y < H);
+    int k = -1;
+    float vL=0, vA=0, vB=0, vX=0, vY=0;
+    int vC=0;
+
+    if (active) {
+        k = d_labels[idx];
+        if (k >= 0 && k < Kactual) {
+            vL = d_L[idx];
+            vA = d_A[idx];
+            vB = d_B[idx];
+            vX = (float)x;
+            vY = (float)y;
+            vC = 1;
+        } else {
+            active = false;
+        }
+    }
+
+    // Warp Aggregation to reduce atomic contention
+    unsigned int mask = __activemask();
+    unsigned int remaining = __ballot_sync(mask, active);
+    int lane = (threadIdx.y * blockDim.x + threadIdx.x) & 31; 
+
+    while (remaining) {
+        int leader_lane = __ffs(remaining) - 1;
+        int leader_k = __shfl_sync(remaining, k, leader_lane);
+        
+        unsigned int peers = __ballot_sync(remaining, (k == leader_k));
+        
+        float rL = vL; float rA = vA; float rB = vB; float rX = vX; float rY = vY; int rC = vC;
+
+        // Reduction within peers
+        #pragma unroll
+        for (int offset = 16; offset > 0; offset /= 2) {
+            float oL = __shfl_down_sync(remaining, rL, offset);
+            float oA = __shfl_down_sync(remaining, rA, offset);
+            float oB = __shfl_down_sync(remaining, rB, offset);
+            float oX = __shfl_down_sync(remaining, rX, offset);
+            float oY = __shfl_down_sync(remaining, rY, offset);
+            int   oC = __shfl_down_sync(remaining, rC, offset);
+            
+            if ((peers & (1u << (lane + offset)))) {
+                rL += oL; rA += oA; rB += oB; rX += oX; rY += oY; rC += oC;
+            }
+        }
+
+        if (lane == leader_lane) {
+            atomicAdd(&accL[leader_k], rL);
+            atomicAdd(&accA[leader_k], rA);
+            atomicAdd(&accB[leader_k], rB);
+            atomicAdd(&accX[leader_k], rX);
+            atomicAdd(&accY[leader_k], rY);
+            atomicAdd(&accCount[leader_k], rC);
+        }
+        remaining &= ~peers;
+    }
 }
 
 // ---------------------------------------------------------
@@ -660,6 +856,66 @@ __global__ void k_reconstruct(const unsigned char* __restrict__ src,
     atomicAdd(&count[k], 1);
 }
 
+// Reconstruct accumulation (RGB)
+__global__ void k_accumulate_rgb_opt(const unsigned char* __restrict__ src,
+                                     const int* __restrict__ d_labels,
+                                     float* sumR, float* sumG, float* sumB, int* count,
+                                     int W, int H, int C, int Kactual)
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int idx = y * W + x;
+    
+    bool active = (x < W && y < H);
+    int k = -1;
+    float vR=0, vG=0, vB=0;
+    int vC=0;
+
+    if (active) {
+        k = d_labels[idx];
+        if (k >= 0 && k < Kactual) {
+            vR = (float)src[idx*C+0];
+            vG = (float)src[idx*C+1];
+            vB = (float)src[idx*C+2];
+            vC = 1;
+        } else {
+            active = false;
+        }
+    }
+
+    unsigned int mask = __activemask();
+    unsigned int remaining = __ballot_sync(mask, active);
+    int lane = (threadIdx.y * blockDim.x + threadIdx.x) & 31;
+
+    while (remaining) {
+        int leader_lane = __ffs(remaining) - 1;
+        int leader_k = __shfl_sync(remaining, k, leader_lane);
+        unsigned int peers = __ballot_sync(remaining, (k == leader_k));
+        
+        float rR = vR; float rG = vG; float rB = vB; int rC = vC;
+
+        #pragma unroll
+        for (int offset = 16; offset > 0; offset /= 2) {
+            float oR = __shfl_down_sync(remaining, rR, offset);
+            float oG = __shfl_down_sync(remaining, rG, offset);
+            float oB = __shfl_down_sync(remaining, rB, offset);
+            int   oC = __shfl_down_sync(remaining, rC, offset);
+            
+            if ((peers & (1u << (lane + offset)))) {
+                rR += oR; rG += oG; rB += oB; rC += oC;
+            }
+        }
+
+        if (lane == leader_lane) {
+            atomicAdd(&sumR[leader_k], rR);
+            atomicAdd(&sumG[leader_k], rG);
+            atomicAdd(&sumB[leader_k], rB);
+            atomicAdd(&count[leader_k], rC);
+        }
+        remaining &= ~peers;
+    }
+}
+
 __global__ void k_write_pixels(unsigned char* dst,
                                const int* __restrict__ labels,
                                const float* sumR, const float* sumG, const float* sumB, const int* count,
@@ -668,17 +924,46 @@ __global__ void k_write_pixels(unsigned char* dst,
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= W * H) return;
     
+    int x = idx % W;
+    int y = idx / W;
     int k = labels[idx];
-    if(k < 0 || k >= Kactual) return;
 
-    int cnt = count[k];
-    if(cnt > 0) {
-        dst[idx*C+0] = (unsigned char)(sumR[k] / cnt);
-        dst[idx*C+1] = (unsigned char)(sumG[k] / cnt);
-        dst[idx*C+2] = (unsigned char)(sumB[k] / cnt);
-    } else {
-        dst[idx*C+0] = 0; dst[idx*C+1] = 0; dst[idx*C+2] = 0;
+    // --- 新增邊界偵測邏輯 ---
+    bool is_border = false;
+    
+    // 檢查右邊
+    if (x < W - 1) {
+        int k_right = labels[idx + 1];
+        if (k != k_right) is_border = true;
     }
+    // 檢查下面 (如果還沒確定是邊界)
+    if (!is_border && y < H - 1) {
+        int k_down = labels[idx + W];
+        if (k != k_down) is_border = true;
+    }
+    // -----------------------
+
+    if (is_border) {
+        // 黑色邊框
+        dst[idx*C+0] = 0; 
+        dst[idx*C+1] = 0; 
+        dst[idx*C+2] = 0;
+    } else {
+        // 原本的填色邏輯
+        if(k >= 0 && k < Kactual) {
+            int cnt = count[k];
+            if(cnt > 0) {
+                dst[idx*C+0] = (unsigned char)(sumR[k] / cnt);
+                dst[idx*C+1] = (unsigned char)(sumG[k] / cnt);
+                dst[idx*C+2] = (unsigned char)(sumB[k] / cnt);
+            } else {
+                dst[idx*C+0] = 0; dst[idx*C+1] = 0; dst[idx*C+2] = 0;
+            }
+        } else {
+            dst[idx*C+0] = 0; dst[idx*C+1] = 0; dst[idx*C+2] = 0;
+        }
+    }
+    
     if(C==4) dst[idx*C+3] = 255;
 }
 
@@ -837,4 +1122,165 @@ void slic_cuda(Image* src, Image* dst, int K, int max_iters)
     cudaFree(d_cL); cudaFree(d_cA); cudaFree(d_cB); cudaFree(d_cX); cudaFree(d_cY);
     cudaFree(d_grid_to_k);
     cudaFree(d_accL); cudaFree(d_accA); cudaFree(d_accB); cudaFree(d_accX); cudaFree(d_accY); cudaFree(d_accCount);
+}
+
+void slic_cuda_opt(Image* src, Image* dst, int K, int max_iters)
+{
+    int W = src->width;
+    int H = src->height;
+    int C = src->channels;
+    size_t N = (size_t)W * H;
+
+    if (C < 3) { std::cerr << "Requires RGB.\n"; return; }
+
+    // 1. GPU Memory Allocation
+    float *d_L, *d_A, *d_B;
+    int *d_labels;
+    unsigned char *d_src, *d_dst;
+    
+    CUDA_CHECK(cudaMalloc(&d_L, N * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_A, N * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_B, N * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_labels, N * sizeof(int)));
+    CUDA_CHECK(cudaMalloc(&d_src, N * C * sizeof(unsigned char)));
+    CUDA_CHECK(cudaMalloc(&d_dst, N * C * sizeof(unsigned char)));
+
+    CUDA_CHECK(cudaMemcpy(d_src, src->data, N * C * sizeof(unsigned char), cudaMemcpyHostToDevice));
+
+    // 2. Precompute Lab
+    int blockSize = 256;
+    int numBlocks = (N + blockSize - 1) / blockSize;
+    k_rgb2lab<<<numBlocks, blockSize>>>(d_src, d_L, d_A, d_B, W, H, C);
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+    // 3. Initialize Centers (on Host)
+    std::vector<float> h_L(N), h_A(N), h_B(N);
+    CUDA_CHECK(cudaMemcpy(h_L.data(), d_L, N * sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(h_A.data(), d_A, N * sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(h_B.data(), d_B, N * sizeof(float), cudaMemcpyDeviceToHost));
+
+    float S = sqrtf((float)N / K);
+    
+    std::vector<float> h_cL, h_cA, h_cB, h_cX, h_cY;
+    h_cL.reserve(K); h_cA.reserve(K); h_cB.reserve(K); h_cX.reserve(K); h_cY.reserve(K);
+
+    int grid_w = (int)ceil(W / S);
+    int grid_h = (int)ceil(H / S);
+    std::vector<int> h_grid_to_k(grid_w * grid_h, -1);
+
+    int k_idx = 0;
+    for (float cy = S/2; cy < H; cy += S) {
+        for (float cx = S/2; cx < W; cx += S) {
+            size_t ix = (int)cx;
+            size_t iy = (int)cy;
+            size_t idx = iy * W + ix;
+            
+            h_cL.push_back(h_L[idx]);
+            h_cA.push_back(h_A[idx]);
+            h_cB.push_back(h_B[idx]);
+            h_cX.push_back(cx);
+            h_cY.push_back(cy);
+
+            int gx = (int)(cx / S);
+            int gy = (int)(cy / S);
+            if (gx < grid_w && gy < grid_h) h_grid_to_k[gy*grid_w + gx] = k_idx;
+            
+            k_idx++;
+        }
+    }
+    int Kactual = k_idx;
+
+    // Allocate Center Data on GPU
+    float *d_cL, *d_cA, *d_cB, *d_cX, *d_cY;
+    int *d_grid_to_k;
+    float *d_accL, *d_accA, *d_accB, *d_accX, *d_accY;
+    int *d_accCount;
+
+    CUDA_CHECK(cudaMalloc(&d_cL, Kactual * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_cA, Kactual * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_cB, Kactual * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_cX, Kactual * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_cY, Kactual * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grid_to_k, h_grid_to_k.size() * sizeof(int)));
+
+    CUDA_CHECK(cudaMalloc(&d_accL, Kactual * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_accA, Kactual * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_accB, Kactual * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_accX, Kactual * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_accY, Kactual * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_accCount, Kactual * sizeof(int)));
+
+    CUDA_CHECK(cudaMemcpy(d_cL, h_cL.data(), Kactual * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_cA, h_cA.data(), Kactual * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_cB, h_cB.data(), Kactual * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_cX, h_cX.data(), Kactual * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_cY, h_cY.data(), Kactual * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_grid_to_k, h_grid_to_k.data(), h_grid_to_k.size() * sizeof(int), cudaMemcpyHostToDevice));
+
+    // 4. Main Loop
+    const float m = 20.0f; 
+    int blocksK = (Kactual + 255) / 256;
+
+    // Use 2D blocks for assignment/accumulate
+    dim3 blockDim2D(16, 16);
+    dim3 gridDim2D((W + 15) / 16, (H + 15) / 16);
+
+    for (int iter = 0; iter < max_iters; ++iter) {
+        // Step A: Assignment (Pixel-Centric)
+        k_assignment_opt<<<gridDim2D, blockDim2D>>>(d_L, d_A, d_B, 
+                                                    d_cL, d_cA, d_cB, d_cX, d_cY, 
+                                                    d_grid_to_k, d_labels,
+                                                    W, H, grid_w, grid_h, S, m);
+        CUDA_CHECK(cudaGetLastError());
+
+        // Step B: Reset Accumulators
+        CUDA_CHECK(cudaMemset(d_accL, 0, Kactual * sizeof(float)));
+        CUDA_CHECK(cudaMemset(d_accA, 0, Kactual * sizeof(float)));
+        CUDA_CHECK(cudaMemset(d_accB, 0, Kactual * sizeof(float)));
+        CUDA_CHECK(cudaMemset(d_accX, 0, Kactual * sizeof(float)));
+        CUDA_CHECK(cudaMemset(d_accY, 0, Kactual * sizeof(float)));
+        CUDA_CHECK(cudaMemset(d_accCount, 0, Kactual * sizeof(int)));
+
+        // Step C: Accumulate (Warp Aggregated)
+        k_accumulate_opt<<<gridDim2D, blockDim2D>>>(d_L, d_A, d_B, d_labels,
+                                                    d_accL, d_accA, d_accB, d_accX, d_accY, d_accCount,
+                                                    W, H, Kactual);
+        CUDA_CHECK(cudaGetLastError());
+
+        // Step D: Update Centers
+        k_update_centers<<<blocksK, 256>>>(d_cL, d_cA, d_cB, d_cX, d_cY,
+                                           d_accL, d_accA, d_accB, d_accX, d_accY, d_accCount,
+                                           Kactual);
+        CUDA_CHECK(cudaGetLastError());
+    }
+
+    // 5. Reconstruction
+    float *d_sumR = d_accL; 
+    float *d_sumG = d_accA; 
+    float *d_sumB = d_accB; 
+    int *d_cntP = d_accCount;
+
+    CUDA_CHECK(cudaMemset(d_sumR, 0, Kactual * sizeof(float)));
+    CUDA_CHECK(cudaMemset(d_sumG, 0, Kactual * sizeof(float)));
+    CUDA_CHECK(cudaMemset(d_sumB, 0, Kactual * sizeof(float)));
+    CUDA_CHECK(cudaMemset(d_cntP, 0, Kactual * sizeof(int)));
+
+    // Use optimized RGB accumulation
+    k_accumulate_rgb_opt<<<gridDim2D, blockDim2D>>>(d_src, d_labels, d_sumR, d_sumG, d_sumB, d_cntP, W, H, C, Kactual);
+    CUDA_CHECK(cudaGetLastError());
+
+    // Reuse k_write_pixels (it's memory bound, simple enough)
+    k_write_pixels<<<numBlocks, blockSize>>>(d_dst, d_labels, d_sumR, d_sumG, d_sumB, d_cntP, W, H, C, Kactual);
+    CUDA_CHECK(cudaGetLastError());
+
+    // Copy Back
+    CUDA_CHECK(cudaMemcpy(dst->data, d_dst, N * C * sizeof(unsigned char), cudaMemcpyDeviceToHost));
+
+    // Cleanup
+    cudaFree(d_L); cudaFree(d_A); cudaFree(d_B); cudaFree(d_labels);
+    cudaFree(d_src); cudaFree(d_dst);
+    cudaFree(d_cL); cudaFree(d_cA); cudaFree(d_cB); cudaFree(d_cX); cudaFree(d_cY);
+    cudaFree(d_grid_to_k);
+    cudaFree(d_accL); cudaFree(d_accA); cudaFree(d_accB); cudaFree(d_accX); cudaFree(d_accY);
+    cudaFree(d_accCount);
 }
