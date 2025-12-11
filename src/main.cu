@@ -190,23 +190,23 @@ int main(int argc, char* argv[]) {
             cudaEventDestroy(start);
             cudaEventDestroy(stop);
         }
-        else if (std::strcmp(mode, "cudaopt") == 0) {
-            cudaEvent_t start, stop;
-            cudaEventCreate(&start);
-            cudaEventCreate(&stop);
+        // else if (std::strcmp(mode, "cudaopt") == 0) {
+        //     cudaEvent_t start, stop;
+        //     cudaEventCreate(&start);
+        //     cudaEventCreate(&stop);
 
-            cudaEventRecord(start);
-            slic_cuda_opt(src, dst, K, max_iters);
-            cudaEventRecord(stop);
-            cudaEventSynchronize(stop);
+        //     cudaEventRecord(start);
+        //     slic_cuda_opt(src, dst, K, max_iters);
+        //     cudaEventRecord(stop);
+        //     cudaEventSynchronize(stop);
 
             float ms = 0.0f;
             cudaEventElapsedTime(&ms, start, stop);
             std::cout << "[slic-CUDA_OPT] time = " << ms / 1000.0f << " sec\n";
 
-            cudaEventDestroy(start);
-            cudaEventDestroy(stop);
-        }
+        //     cudaEventDestroy(start);
+        //     cudaEventDestroy(stop);
+        // }
     }
     
     write_png(output_path, dst->data, height, width, channels);

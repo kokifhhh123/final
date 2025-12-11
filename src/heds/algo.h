@@ -14,7 +14,7 @@ void kmeans_cuda_warp(Image* src, Image* dst, int K, int max_iters);
 void slic_seq(Image* src, Image* dst, int K, int max_iters);
 void slic_omp(Image* src, Image* dst, int K, int max_iters);
 void slic_cuda(Image* src, Image* dst, int K, int max_iters);
-void slic_cuda_opt(Image* src, Image* dst, int K, int max_iters);
+// void slic_cuda_opt(Image* src, Image* dst, int K, int max_iters);
 
 
 __global__ void k_update_centers(float* cL, float* cA, float* cB,
