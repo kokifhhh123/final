@@ -185,7 +185,7 @@ int main(int argc, char* argv[]) {
 
             float ms = 0.0f;
             cudaEventElapsedTime(&ms, start, stop);
-            std::cout << "[CUDA_OPT] time = " << ms / 1000.0f << " sec\n";
+            std::cout << "[slic-CUDA] time = " << ms / 1000.0f << " sec\n";
 
             cudaEventDestroy(start);
             cudaEventDestroy(stop);
@@ -200,9 +200,9 @@ int main(int argc, char* argv[]) {
         //     cudaEventRecord(stop);
         //     cudaEventSynchronize(stop);
 
-        //     float ms = 0.0f;
-        //     cudaEventElapsedTime(&ms, start, stop);
-        //     std::cout << "[CUDA_OPT] time = " << ms / 1000.0f << " sec\n";
+            float ms = 0.0f;
+            cudaEventElapsedTime(&ms, start, stop);
+            std::cout << "[slic-CUDA_OPT] time = " << ms / 1000.0f << " sec\n";
 
         //     cudaEventDestroy(start);
         //     cudaEventDestroy(stop);
