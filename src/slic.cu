@@ -8,7 +8,6 @@
 #include <omp.h>
 
 
-
 // ---------------------------------------------------------
 // SLIC Sequential Version (Pixel-Centric Logic)
 // ---------------------------------------------------------
@@ -238,7 +237,6 @@ void slic_seq(Image* src, Image* dst, int K, int max_iters)
         }
     }
 }
-
 
 void slic_omp(Image* src, Image* dst, int K, int max_iters)
 {
@@ -529,11 +527,9 @@ __device__ void rgb2lab_gpu(unsigned char R, unsigned char G, unsigned char B,
     auto f2 = [](float t) {
         return (t > 0.008856f) ? powf(t, 1.0f/3.0f) : (7.787f * t + 16.0f/116.0f);
     };
-    
     float fx = f2(X);
     float fy = f2(Y);
     float fz = f2(Z);
-
     L = 116.0f * fy - 16.0f;
     a = 500.0f * (fx - fy);
     b = 200.0f * (fy - fz);
@@ -560,6 +556,8 @@ __global__ void k_rgb2lab(const unsigned char* __restrict__ src,
     d_A[idx] = A;
     d_B[idx] = B;
 }
+
+
 
 // ---------------------------------------------------------
 // Kernel: Assignment (關鍵步驟！像素去找中心，保證無競爭)
@@ -708,6 +706,8 @@ __global__ void k_assignment_opt(const float* __restrict__ d_L,
     d_labels[idx] = best_k;
 }
 
+
+
 // ---------------------------------------------------------
 // Kernel: Accumulate (使用 Atomic 加法，這是最安全的平行方式)
 // ---------------------------------------------------------
@@ -735,7 +735,6 @@ __global__ void k_accumulate(const float* __restrict__ d_L,
     atomicAdd(&accY[k], (float)y);
     atomicAdd(&accCount[k], 1);
 }
-
 __global__ void k_accumulate_opt(const float* __restrict__ d_L,
                                  const float* __restrict__ d_A,
                                  const float* __restrict__ d_B,
@@ -807,28 +806,7 @@ __global__ void k_accumulate_opt(const float* __restrict__ d_L,
     }
 }
 
-// ---------------------------------------------------------
-// Kernel: Update Centers (取平均)
-// ---------------------------------------------------------
-__global__ void k_update_centers(float* cL, float* cA, float* cB,
-                                 float* cX, float* cY,
-                                 const float* accL, const float* accA, const float* accB,
-                                 const float* accX, const float* accY, const int* accCount,
-                                 int Kactual)
-{
-    int k = blockIdx.x * blockDim.x + threadIdx.x;
-    if (k >= Kactual) return;
 
-    int count = accCount[k];
-    if (count > 0) {
-        float inv = 1.0f / count;
-        cL[k] = accL[k] * inv;
-        cA[k] = accA[k] * inv;
-        cB[k] = accB[k] * inv;
-        cX[k] = accX[k] * inv;
-        cY[k] = accY[k] * inv;
-    }
-}
 
 // ---------------------------------------------------------
 // Kernel: Reconstruction (畫出最終結果)
@@ -913,6 +891,32 @@ __global__ void k_accumulate_rgb_opt(const unsigned char* __restrict__ src,
             atomicAdd(&count[leader_k], rC);
         }
         remaining &= ~peers;
+    }
+}
+
+
+
+
+// ---------------------------------------------------------
+// Kernel: Update Centers (取平均)
+// ---------------------------------------------------------
+__global__ void k_update_centers(float* cL, float* cA, float* cB,
+                                 float* cX, float* cY,
+                                 const float* accL, const float* accA, const float* accB,
+                                 const float* accX, const float* accY, const int* accCount,
+                                 int Kactual)
+{
+    int k = blockIdx.x * blockDim.x + threadIdx.x;
+    if (k >= Kactual) return;
+
+    int count = accCount[k];
+    if (count > 0) {
+        float inv = 1.0f / count;
+        cL[k] = accL[k] * inv;
+        cA[k] = accA[k] * inv;
+        cB[k] = accB[k] * inv;
+        cX[k] = accX[k] * inv;
+        cY[k] = accY[k] * inv;
     }
 }
 
@@ -1123,7 +1127,6 @@ void slic_cuda(Image* src, Image* dst, int K, int max_iters)
     cudaFree(d_grid_to_k);
     cudaFree(d_accL); cudaFree(d_accA); cudaFree(d_accB); cudaFree(d_accX); cudaFree(d_accY); cudaFree(d_accCount);
 }
-
 void slic_cuda_opt(Image* src, Image* dst, int K, int max_iters)
 {
     int W = src->width;

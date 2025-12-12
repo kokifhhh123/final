@@ -118,6 +118,11 @@ void kmeans_seq(Image* src, Image* dst, int K, int max_iters) {
     }
 }
 
+
+
+
+
+
 void kmeans_omp(Image* src, Image* dst, int K, int max_iters) {
     unsigned width  = src->width;
     unsigned height = src->height;
@@ -223,6 +228,11 @@ void kmeans_omp(Image* src, Image* dst, int K, int max_iters) {
 }
 
 
+
+
+
+
+
 __global__ void assign_kernel(const Pixel* pixels,
                               const Pixel* centroids,
                               int* assignments,
@@ -263,7 +273,6 @@ __global__ void accumulate_kernel(const Pixel* pixels,
     atomicAdd(&accum[k].b, p.b);
     atomicAdd(&counts[k], 1);
 }
-
 
 void kmeans_cuda(Image* src, Image* dst, int K, int max_iters) {
     unsigned width  = src->width;
@@ -379,6 +388,11 @@ void kmeans_cuda(Image* src, Image* dst, int K, int max_iters) {
     CHECK_CUDA(cudaFree(d_assignments));
 }
 
+
+
+
+
+
 // Optimized assignment: centroids cached in shared memory
 __global__ void assign_kernel_opt(const Pixel* pixels,
                                   const Pixel* centroids,
@@ -455,98 +469,6 @@ __global__ void accumulate_kernel_opt(const Pixel* pixels,
         }
     }
 }
-
-__global__ void update_centroids_kernel(Pixel* centroids,
-                                        const Pixel* accum,
-                                        const int* counts,
-                                        int K)
-{
-    int k = blockIdx.x * blockDim.x + threadIdx.x;
-    if (k >= K) return;
-
-    int c = counts[k];
-    if (c > 0) {
-        // average
-        centroids[k].r = accum[k].r / c;
-        centroids[k].g = accum[k].g / c;
-        centroids[k].b = accum[k].b / c;
-    }
-    // if c == 0, keep old centroid
-}
-
-__global__ void accumulate_kernel_warp(const Pixel* pixels,
-                                       const int* assignments,
-                                       Pixel* g_accum,
-                                       int* g_counts,
-                                       int N)
-{
-    int global_idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int lane       = threadIdx.x & 31;            // lane id in warp
-    unsigned full_mask = 0xffffffffu;
-
-    // 判斷哪些 lane 有有效 pixel
-    int  have_pixel = (global_idx < N);
-    unsigned active = __ballot_sync(full_mask, have_pixel);
-
-    if (!active) return;  // 這整個 warp 都沒事做
-
-    // 每個 thread 自己的 k 與 (r,g,b,1)
-    int   k      = -1;
-    float r_val  = 0.0f;
-    float g_val  = 0.0f;
-    float b_val  = 0.0f;
-    int   c_val  = 0;
-
-    if (have_pixel) {
-        k = assignments[global_idx];
-        Pixel p = pixels[global_idx];
-        r_val = p.r;
-        g_val = p.g;
-        b_val = p.b;
-        c_val = 1;
-    }
-
-    // remaining 代表這個 warp 裡還沒被處理的 lanes
-    unsigned remaining = active;
-
-    // 反覆處理 warp 中「同一個 cluster」的那一群 lanes
-    while (remaining) {
-        // 找出剩下的其中一個 leader lane
-        int leader_lane = __ffs(remaining) - 1;   // first set bit -> 0-based lane id
-
-        // 把 leader 的 cluster id 廣播給整個 warp（只在 remaining 的 mask 裏）
-        int leader_k = __shfl_sync(remaining, k, leader_lane);
-
-        // 找出 warp 中，哪些 lanes 也是這個 cluster（且還在 remaining 裏）
-        unsigned mask_k = __ballot_sync(remaining, have_pixel && (k == leader_k));
-
-        // 只有屬於這個 cluster 的 lanes 會貢獻數值
-        float r_sum = (mask_k & (1u << lane)) ? r_val : 0.0f;
-        float g_sum = (mask_k & (1u << lane)) ? g_val : 0.0f;
-        float b_sum = (mask_k & (1u << lane)) ? b_val : 0.0f;
-        int   c_sum = (mask_k & (1u << lane)) ? c_val : 0;
-
-        // 在該 mask_k 上做 warp-level reduction
-        for (int offset = 16; offset > 0; offset >>= 1) {
-            r_sum += __shfl_down_sync(mask_k, r_sum, offset);
-            g_sum += __shfl_down_sync(mask_k, g_sum, offset);
-            b_sum += __shfl_down_sync(mask_k, b_sum, offset);
-            c_sum += __shfl_down_sync(mask_k, c_sum, offset);
-        }
-
-        // leader_lane 負責把整個 warp 對這個 cluster 的貢獻做一次 atomicAdd
-        if (lane == leader_lane) {
-            atomicAdd(&g_accum[leader_k].r, r_sum);
-            atomicAdd(&g_accum[leader_k].g, g_sum);
-            atomicAdd(&g_accum[leader_k].b, b_sum);
-            atomicAdd(&g_counts[leader_k],  c_sum);
-        }
-
-        // 把已經處理過的 lanes 從 remaining 裡移除
-        remaining &= ~mask_k;
-    }
-}
-
 
 void kmeans_cuda_opt(Image* src, Image* dst, int K, int max_iters) {
     if (K > MAX_K) {
@@ -674,124 +596,83 @@ void kmeans_cuda_opt(Image* src, Image* dst, int K, int max_iters) {
 }
 
 
-void kmeans_cuda_opt_more(Image* src, Image* dst, int K, int max_iters) {
-    if (K > MAX_K) {
-        std::cerr << "K > MAX_K, please increase MAX_K.\n";
-        return;
+
+
+
+
+
+__global__ void accumulate_kernel_warp(const Pixel* pixels,
+                                       const int* assignments,
+                                       Pixel* g_accum,
+                                       int* g_counts,
+                                       int N)
+{
+    int global_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int lane       = threadIdx.x & 31;            // lane id in warp
+    unsigned full_mask = 0xffffffffu;
+
+    // 判斷哪些 lane 有有效 pixel
+    int  have_pixel = (global_idx < N);
+    unsigned active = __ballot_sync(full_mask, have_pixel);
+
+    if (!active) return;  // 這整個 warp 都沒事做
+
+    // 每個 thread 自己的 k 與 (r,g,b,1)
+    int   k      = -1;
+    float r_val  = 0.0f;
+    float g_val  = 0.0f;
+    float b_val  = 0.0f;
+    int   c_val  = 0;
+
+    if (have_pixel) {
+        k = assignments[global_idx];
+        Pixel p = pixels[global_idx];
+        r_val = p.r;
+        g_val = p.g;
+        b_val = p.b;
+        c_val = 1;
     }
 
-    unsigned width  = src->width;
-    unsigned height = src->height;
-    unsigned channels = src->channels;
+    // remaining 代表這個 warp 裡還沒被處理的 lanes
+    unsigned remaining = active;
 
-    if (channels < 3) {
-        std::cerr << "Image must have at least 3 channels (RGB).\n";
-        return;
-    }
+    // 反覆處理 warp 中「同一個 cluster」的那一群 lanes
+    while (remaining) {
+        // 找出剩下的其中一個 leader lane
+        int leader_lane = __ffs(remaining) - 1;   // first set bit -> 0-based lane id
 
-    size_t N = (size_t)width * (size_t)height;
+        // 把 leader 的 cluster id 廣播給整個 warp（只在 remaining 的 mask 裏）
+        int leader_k = __shfl_sync(remaining, k, leader_lane);
 
-    // host pixels
-    std::vector<Pixel> h_pixels(N);
-    for (size_t i = 0; i < N; ++i) {
-        h_pixels[i].r = src->data[i*channels + 0];
-        h_pixels[i].g = src->data[i*channels + 1];
-        h_pixels[i].b = src->data[i*channels + 2];
-    }
+        // 找出 warp 中，哪些 lanes 也是這個 cluster（且還在 remaining 裏）
+        unsigned mask_k = __ballot_sync(remaining, have_pixel && (k == leader_k));
 
-    // initial centroids on host
-    std::srand(std::time(nullptr));
-    std::vector<Pixel> h_centroids(K);
-    for (int k = 0; k < K; ++k) {
-        size_t idx = std::rand() % N;
-        h_centroids[k] = h_pixels[idx];
-    }
+        // 只有屬於這個 cluster 的 lanes 會貢獻數值
+        float r_sum = (mask_k & (1u << lane)) ? r_val : 0.0f;
+        float g_sum = (mask_k & (1u << lane)) ? g_val : 0.0f;
+        float b_sum = (mask_k & (1u << lane)) ? b_val : 0.0f;
+        int   c_sum = (mask_k & (1u << lane)) ? c_val : 0;
 
-    // device buffers
-    Pixel* d_pixels      = nullptr;
-    Pixel* d_centroids   = nullptr;
-    Pixel* d_accum       = nullptr;
-    int*   d_counts      = nullptr;
-    int*   d_assignments = nullptr;
-
-    CHECK_CUDA(cudaMalloc(&d_pixels,      N * sizeof(Pixel)));
-    CHECK_CUDA(cudaMalloc(&d_centroids,   K * sizeof(Pixel)));
-    CHECK_CUDA(cudaMalloc(&d_accum,       K * sizeof(Pixel)));
-    CHECK_CUDA(cudaMalloc(&d_counts,      K * sizeof(int)));
-    CHECK_CUDA(cudaMalloc(&d_assignments, N * sizeof(int)));
-
-    // copy pixels and initial centroids to device once
-    CHECK_CUDA(cudaMemcpy(d_pixels, h_pixels.data(),
-                          N * sizeof(Pixel), cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpy(d_centroids, h_centroids.data(),
-                          K * sizeof(Pixel), cudaMemcpyHostToDevice));
-
-    int threads = 256;
-    int blocks  = (int)((N + threads - 1) / threads);
-
-    // shared memory sizes for opt kernels
-    size_t shmem_assign = K * sizeof(Pixel);
-    size_t shmem_acc    = K * (sizeof(Pixel) + sizeof(int));
-
-    // kernel config for centroid update
-    int threadsK = 128;
-    int blocksK  = (K + threadsK - 1) / threadsK;
-
-    for (int iter = 0; iter < max_iters; ++iter) {
-        // 1) assignment with centroids cached in shared memory
-        assign_kernel_opt<<<blocks, threads, shmem_assign>>>(
-            d_pixels, d_centroids, d_assignments, (int)N, K
-        );
-        CHECK_CUDA(cudaGetLastError());
-
-        // 2) clear accumulators on device
-        CHECK_CUDA(cudaMemset(d_accum,  0, K * sizeof(Pixel)));
-        CHECK_CUDA(cudaMemset(d_counts, 0, K * sizeof(int)));
-
-        // 3) block-local reduction in shared, then merge to global
-        accumulate_kernel_opt<<<blocks, threads, shmem_acc>>>(
-            d_pixels, d_assignments, d_accum, d_counts, (int)N, K
-        );
-        CHECK_CUDA(cudaGetLastError());
-
-        // 4) update centroids on GPU (no D2H / H2D in the loop)
-        update_centroids_kernel<<<blocksK, threadsK>>>(
-            d_centroids, d_accum, d_counts, K
-        );
-        CHECK_CUDA(cudaGetLastError());
-
-        std::cout << "[CUDA_OPT_MORE] Iteration " << (iter+1)
-                  << "/" << max_iters << " done.\n";
-    }
-
-    // copy final centroids and assignments back to host once
-    std::vector<Pixel> h_centroids_final(K);
-    std::vector<int>   h_assignments(N);
-
-    CHECK_CUDA(cudaMemcpy(h_centroids_final.data(), d_centroids,
-                          K * sizeof(Pixel), cudaMemcpyDeviceToHost));
-    CHECK_CUDA(cudaMemcpy(h_assignments.data(), d_assignments,
-                          N * sizeof(int), cudaMemcpyDeviceToHost));
-
-    // write result to dst
-    for (size_t i = 0; i < N; ++i) {
-        int k = h_assignments[i];
-        dst->data[i*channels + 0] = (unsigned char)h_centroids_final[k].r;
-        dst->data[i*channels + 1] = (unsigned char)h_centroids_final[k].g;
-        dst->data[i*channels + 2] = (unsigned char)h_centroids_final[k].b;
-        if (channels == 4) {
-            dst->data[i*channels + 3] = src->data[i*channels + 3];
+        // 在該 mask_k 上做 warp-level reduction
+        for (int offset = 16; offset > 0; offset >>= 1) {
+            r_sum += __shfl_down_sync(mask_k, r_sum, offset);
+            g_sum += __shfl_down_sync(mask_k, g_sum, offset);
+            b_sum += __shfl_down_sync(mask_k, b_sum, offset);
+            c_sum += __shfl_down_sync(mask_k, c_sum, offset);
         }
+
+        // leader_lane 負責把整個 warp 對這個 cluster 的貢獻做一次 atomicAdd
+        if (lane == leader_lane) {
+            atomicAdd(&g_accum[leader_k].r, r_sum);
+            atomicAdd(&g_accum[leader_k].g, g_sum);
+            atomicAdd(&g_accum[leader_k].b, b_sum);
+            atomicAdd(&g_counts[leader_k],  c_sum);
+        }
+
+        // 把已經處理過的 lanes 從 remaining 裡移除
+        remaining &= ~mask_k;
     }
-
-    // free device memory
-    CHECK_CUDA(cudaFree(d_pixels));
-    CHECK_CUDA(cudaFree(d_centroids));
-    CHECK_CUDA(cudaFree(d_accum));
-    CHECK_CUDA(cudaFree(d_counts));
-    CHECK_CUDA(cudaFree(d_assignments));
 }
-
 
 void kmeans_cuda_warp(Image* src, Image* dst, int K, int max_iters) {
     if (K > MAX_K) {
@@ -914,266 +795,6 @@ void kmeans_cuda_warp(Image* src, Image* dst, int K, int max_iters) {
     CHECK_CUDA(cudaFree(d_pixels));
     CHECK_CUDA(cudaFree(d_centroids));
     CHECK_CUDA(cudaFree(d_accum));
-    CHECK_CUDA(cudaFree(d_counts));
-    CHECK_CUDA(cudaFree(d_assignments));
-}
-
-
-
-
-// assignment with SoA + shared centroids
-__global__ void assign_kernel_opt_soa(
-    const float* r, const float* g, const float* b,
-    const float* cr, const float* cg, const float* cb,
-    int* assignments,
-    int N, int K)
-{
-    extern __shared__ float s[];
-    float* s_cr = s;
-    float* s_cg = s_cr + K;
-    float* s_cb = s_cg + K;
-
-    for (int k = threadIdx.x; k < K; k += blockDim.x) {
-        s_cr[k] = cr[k];
-        s_cg[k] = cg[k];
-        s_cb[k] = cb[k];
-    }
-    __syncthreads();
-
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= N) return;
-
-    float pr = r[idx];
-    float pg = g[idx];
-    float pb = b[idx];
-
-    float best_dist = 1e30f;
-    int best_k = 0;
-
-    for (int k = 0; k < K; ++k) {
-        float dr = pr - s_cr[k];
-        float dg = pg - s_cg[k];
-        float db = pb - s_cb[k];
-        float dist = dr*dr + dg*dg + db*db;
-        if (dist < best_dist) {
-            best_dist = dist;
-            best_k = k;
-        }
-    }
-    assignments[idx] = best_k;
-}
-
-// accumulate with SoA + block-local shared reduction
-__global__ void accumulate_kernel_opt_soa(
-    const float* r, const float* g, const float* b,
-    const int* assignments,
-    float* g_acc_r, float* g_acc_g, float* g_acc_b,
-    int* g_counts,
-    int N, int K)
-{
-    extern __shared__ unsigned char smem[];
-    float* s_acc_r = reinterpret_cast<float*>(smem);
-    float* s_acc_g = s_acc_r + K;
-    float* s_acc_b = s_acc_g + K;
-    int*   s_counts = reinterpret_cast<int*>(s_acc_b + K);
-
-    for (int k = threadIdx.x; k < K; k += blockDim.x) {
-        s_acc_r[k] = 0.f;
-        s_acc_g[k] = 0.f;
-        s_acc_b[k] = 0.f;
-        s_counts[k] = 0;
-    }
-    __syncthreads();
-
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < N) {
-        int cls = assignments[idx];
-        float pr = r[idx];
-        float pg = g[idx];
-        float pb = b[idx];
-
-        atomicAdd(&s_acc_r[cls], pr);
-        atomicAdd(&s_acc_g[cls], pg);
-        atomicAdd(&s_acc_b[cls], pb);
-        atomicAdd(&s_counts[cls], 1);
-    }
-    __syncthreads();
-
-    for (int k = threadIdx.x; k < K; k += blockDim.x) {
-        if (s_counts[k] > 0) {
-            atomicAdd(&g_acc_r[k], s_acc_r[k]);
-            atomicAdd(&g_acc_g[k], s_acc_g[k]);
-            atomicAdd(&g_acc_b[k], s_acc_b[k]);
-            atomicAdd(&g_counts[k], s_counts[k]);
-        }
-    }
-}
-
-// centroid update on GPU, SoA
-__global__ void update_centroids_kernel_soa(
-    float* cr, float* cg, float* cb,
-    const float* acc_r, const float* acc_g, const float* acc_b,
-    const int* counts,
-    int K)
-{
-    int k = blockIdx.x * blockDim.x + threadIdx.x;
-    if (k >= K) return;
-
-    int c = counts[k];
-    if (c > 0) {
-        cr[k] = acc_r[k] / c;
-        cg[k] = acc_g[k] / c;
-        cb[k] = acc_b[k] / c;
-    }
-}
-
-void kmeans_cuda_opt_more_soa(Image* src, Image* dst, int K, int max_iters) {
-    if (K > MAX_K) {
-        std::cerr << "K > MAX_K, please increase MAX_K.\n";
-        return;
-    }
-
-    unsigned width  = src->width;
-    unsigned height = src->height;
-    unsigned channels = src->channels;
-
-    if (channels < 3) {
-        std::cerr << "Image must have at least 3 channels (RGB).\n";
-        return;
-    }
-
-    size_t N = (size_t)width * (size_t)height;
-
-    // host pixels: SoA
-    std::vector<float> h_r(N), h_g(N), h_b(N);
-    for (size_t i = 0; i < N; ++i) {
-        h_r[i] = src->data[i*channels + 0];
-        h_g[i] = src->data[i*channels + 1];
-        h_b[i] = src->data[i*channels + 2];
-    }
-
-    // initial centroids on host: SoA
-    std::srand(std::time(nullptr));
-    std::vector<float> h_cr(K), h_cg(K), h_cb(K);
-    for (int k = 0; k < K; ++k) {
-        size_t idx = std::rand() % N;
-        h_cr[k] = h_r[idx];
-        h_cg[k] = h_g[idx];
-        h_cb[k] = h_b[idx];
-    }
-
-    // device buffers: SoA
-    float* d_r  = nullptr;
-    float* d_g  = nullptr;
-    float* d_b  = nullptr;
-    float* d_cr = nullptr;
-    float* d_cg = nullptr;
-    float* d_cb = nullptr;
-
-    float* d_acc_r = nullptr;
-    float* d_acc_g = nullptr;
-    float* d_acc_b = nullptr;
-    int*   d_counts = nullptr;
-    int*   d_assignments = nullptr;
-
-    CHECK_CUDA(cudaMalloc(&d_r,  N * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&d_g,  N * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&d_b,  N * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&d_cr, K * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&d_cg, K * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&d_cb, K * sizeof(float)));
-
-    CHECK_CUDA(cudaMalloc(&d_acc_r, K * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&d_acc_g, K * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&d_acc_b, K * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&d_counts, K * sizeof(int)));
-    CHECK_CUDA(cudaMalloc(&d_assignments, N * sizeof(int)));
-
-    CHECK_CUDA(cudaMemcpy(d_r,  h_r.data(),  N * sizeof(float), cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpy(d_g,  h_g.data(),  N * sizeof(float), cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpy(d_b,  h_b.data(),  N * sizeof(float), cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpy(d_cr, h_cr.data(), K * sizeof(float), cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpy(d_cg, h_cg.data(), K * sizeof(float), cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpy(d_cb, h_cb.data(), K * sizeof(float), cudaMemcpyHostToDevice));
-
-    int threads = 256;
-    int blocks  = (int)((N + threads - 1) / threads);
-
-    // shared memory sizes
-    size_t shmem_assign = 3 * K * sizeof(float);                 // cr, cg, cb
-    size_t shmem_acc    = 3 * K * sizeof(float) + K * sizeof(int); // acc_r,g,b + counts
-
-    int threadsK = 128;
-    int blocksK  = (K + threadsK - 1) / threadsK;
-
-    for (int iter = 0; iter < max_iters; ++iter) {
-        // 1) assignment with centroids cached in shared (SoA)
-        assign_kernel_opt_soa<<<blocks, threads, shmem_assign>>>(
-            d_r, d_g, d_b,
-            d_cr, d_cg, d_cb,
-            d_assignments,
-            (int)N, K
-        );
-        CHECK_CUDA(cudaGetLastError());
-
-        // 2) clear accumulators
-        CHECK_CUDA(cudaMemset(d_acc_r,  0, K * sizeof(float)));
-        CHECK_CUDA(cudaMemset(d_acc_g,  0, K * sizeof(float)));
-        CHECK_CUDA(cudaMemset(d_acc_b,  0, K * sizeof(float)));
-        CHECK_CUDA(cudaMemset(d_counts, 0, K * sizeof(int)));
-
-        // 3) block-local reduction then merge to global (SoA)
-        accumulate_kernel_opt_soa<<<blocks, threads, shmem_acc>>>(
-            d_r, d_g, d_b,
-            d_assignments,
-            d_acc_r, d_acc_g, d_acc_b,
-            d_counts,
-            (int)N, K
-        );
-        CHECK_CUDA(cudaGetLastError());
-
-        // 4) update centroids on GPU
-        update_centroids_kernel_soa<<<blocksK, threadsK>>>(
-            d_cr, d_cg, d_cb,
-            d_acc_r, d_acc_g, d_acc_b,
-            d_counts,
-            K
-        );
-        CHECK_CUDA(cudaGetLastError());
-
-        std::cout << "[CUDA_OPT_MORE_SOA] Iteration " << (iter+1)
-                  << "/" << max_iters << " done.\n";
-    }
-
-    // copy final centroids and assignments back
-    std::vector<float> h_cr_final(K), h_cg_final(K), h_cb_final(K);
-    std::vector<int> h_assignments(N);
-
-    CHECK_CUDA(cudaMemcpy(h_cr_final.data(), d_cr, K * sizeof(float), cudaMemcpyDeviceToHost));
-    CHECK_CUDA(cudaMemcpy(h_cg_final.data(), d_cg, K * sizeof(float), cudaMemcpyDeviceToHost));
-    CHECK_CUDA(cudaMemcpy(h_cb_final.data(), d_cb, K * sizeof(float), cudaMemcpyDeviceToHost));
-    CHECK_CUDA(cudaMemcpy(h_assignments.data(), d_assignments, N * sizeof(int), cudaMemcpyDeviceToHost));
-
-    // write result
-    for (size_t i = 0; i < N; ++i) {
-        int k = h_assignments[i];
-        dst->data[i*channels + 0] = (unsigned char)h_cr_final[k];
-        dst->data[i*channels + 1] = (unsigned char)h_cg_final[k];
-        dst->data[i*channels + 2] = (unsigned char)h_cb_final[k];
-        if (channels == 4) {
-            dst->data[i*channels + 3] = src->data[i*channels + 3];
-        }
-    }
-
-    CHECK_CUDA(cudaFree(d_r));
-    CHECK_CUDA(cudaFree(d_g));
-    CHECK_CUDA(cudaFree(d_b));
-    CHECK_CUDA(cudaFree(d_cr));
-    CHECK_CUDA(cudaFree(d_cg));
-    CHECK_CUDA(cudaFree(d_cb));
-    CHECK_CUDA(cudaFree(d_acc_r));
-    CHECK_CUDA(cudaFree(d_acc_g));
-    CHECK_CUDA(cudaFree(d_acc_b));
     CHECK_CUDA(cudaFree(d_counts));
     CHECK_CUDA(cudaFree(d_assignments));
 }

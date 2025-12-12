@@ -4,3 +4,4 @@ object/
 bin/
 *.o
 output/
+output2/

@@ -99,23 +99,6 @@ int main(int argc, char* argv[]) {
             cudaEventDestroy(start);
             cudaEventDestroy(stop);
         }
-        else if (std::strcmp(mode, "cuda_opt_more") == 0) {
-            cudaEvent_t start, stop;
-            cudaEventCreate(&start);
-            cudaEventCreate(&stop);
-
-            cudaEventRecord(start);
-            kmeans_cuda_opt_more(src, dst, K, max_iters);
-            cudaEventRecord(stop);
-            cudaEventSynchronize(stop);
-
-            float ms = 0.0f;
-            cudaEventElapsedTime(&ms, start, stop);
-            std::cout << "[CUDA_OPT] time = " << ms / 1000.0f << " sec\n";
-
-            cudaEventDestroy(start);
-            cudaEventDestroy(stop);
-        }
         else if (std::strcmp(mode, "cuda_opt_warp") == 0) {
             cudaEvent_t start, stop;
             cudaEventCreate(&start);
@@ -133,23 +116,6 @@ int main(int argc, char* argv[]) {
             cudaEventDestroy(start);
             cudaEventDestroy(stop);
         }
-        // else if (std::strcmp(mode, "cuda_opt_soa") == 0) {
-        //     cudaEvent_t start, stop;
-        //     cudaEventCreate(&start);
-        //     cudaEventCreate(&stop);
-
-        //     cudaEventRecord(start);
-        //     kmeans_cuda_opt_more_soa(src, dst, K, max_iters);
-        //     cudaEventRecord(stop);
-        //     cudaEventSynchronize(stop);
-
-        //     float ms = 0.0f;
-        //     cudaEventElapsedTime(&ms, start, stop);
-        //     std::cout << "[CUDA_OPT] time = " << ms / 1000.0f << " sec\n";
-
-        //     cudaEventDestroy(start);
-        //     cudaEventDestroy(stop);
-        // }
         else {
             std::cerr << "Invalid mode: " << mode
                     << " (expected seq|omp|cuda|cuda_opt)\n";
@@ -190,7 +156,7 @@ int main(int argc, char* argv[]) {
             cudaEventDestroy(start);
             cudaEventDestroy(stop);
         }
-        else if (std::strcmp(mode, "cudaopt") == 0) {
+        else if (std::strcmp(mode, "cuda_opt") == 0) {
             cudaEvent_t start, stop;
             cudaEventCreate(&start);
             cudaEventCreate(&stop);
@@ -206,6 +172,13 @@ int main(int argc, char* argv[]) {
 
             cudaEventDestroy(start);
             cudaEventDestroy(stop);
+        }
+        else {
+            std::cerr << "Invalid mode: " << mode
+                    << " (expected seq|omp|cuda|cuda_opt)\n";
+            freeImage(src);
+            freeImage(dst);
+            return 1;
         }
     }
     
