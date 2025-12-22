@@ -9,6 +9,3 @@ srun -p nvidia -N1 -n1 --gres=gpu:1 ../bin/main ../testcase/hhh.png ../output/hh
 
 it=7000
 srun -p nvidia -N1 -n1 --gres=gpu:1 ../bin/main ../testcase/lion_${it}.png ../output/lion_slic_cudaopt.png slic cudaopt 10000
-
-
-

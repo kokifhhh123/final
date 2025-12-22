@@ -2,6 +2,7 @@
 #include <cstring>
 #include "utils.h"
 #include <png.h>
+#include <iostream>
 
 void kmeans_seq(Image* src, Image* dst, int K, int max_iters);
 void kmeans_omp(Image* src, Image* dst, int K, int max_iters);
@@ -9,12 +10,29 @@ void kmeans_cuda(Image* src, Image* dst, int K, int max_iters);
 void kmeans_cuda_opt(Image* src, Image* dst, int K, int max_iters);
 void kmeans_cuda_opt_more(Image* src, Image* dst, int K, int max_iters);
 void kmeans_cuda_warp(Image* src, Image* dst, int K, int max_iters);
-// void kmeans_cuda_opt_more_soa(Image* src, Image* dst, int K, int max_iters);
 
 void slic_seq(Image* src, Image* dst, int K, int max_iters);
 void slic_omp(Image* src, Image* dst, int K, int max_iters);
 void slic_cuda(Image* src, Image* dst, int K, int max_iters);
 void slic_cuda_opt(Image* src, Image* dst, int K, int max_iters);
+
+KMeansTiming kmeans_cuda_warp_timed(const Image* src, Image* dst, int K, int max_iters);
+KMeansTiming kmeans_cuda_opt_timed(const Image* src, Image* dst, int K, int max_iters);
+
+// Optional: pretty print
+static inline void print_kmeans_timing(const KMeansTiming& t) {
+    std::cout << "[CUDA_WARP_TIMING]\n";
+    std::cout << "Host prep (IO)   : " << t.io_host_prep_s << " s\n";
+    std::cout << "H2D init         : " << t.h2d_init_s     << " s\n";
+    std::cout << "Assign kernel    : " << t.assign_s       << " s\n";
+    std::cout << "Memset           : " << t.memset_s       << " s\n";
+    std::cout << "Accumulate kernel: " << t.accum_s        << " s\n";
+    std::cout << "D2H per-iter     : " << t.d2h_iter_s     << " s\n";
+    std::cout << "Host update      : " << t.host_update_s  << " s\n";
+    std::cout << "H2D centroids    : " << t.h2d_cent_s     << " s\n";
+    std::cout << "D2H final assign : " << t.d2h_final_s    << " s\n";
+    std::cout << "Total            : " << t.total_s        << " s\n";
+}
 
 
 __global__ void k_update_centers(float* cL, float* cA, float* cB,
@@ -40,7 +58,22 @@ __global__ void k_write_pixels(unsigned char* dst,
 __global__ void k_rgb2lab(const unsigned char* __restrict__ src,
                           float* d_L, float* d_A, float* d_B,
                           int W, int H, int C);
-// rgb2lab 函式保持不變，直接沿用即可
+
+__global__ void assign_kernel_opt(const Pixel* pixels,
+                                  const Pixel* centroids,
+                                  int* assignments,
+                                  int N, int K);
+__global__ void accumulate_kernel_warp(const Pixel* pixels,
+                                       const int* assignments,
+                                       Pixel* g_accum,
+                                       int* g_counts,
+                                       int N);
+__global__ void accumulate_kernel_opt(const Pixel* pixels,
+                                      const int* assignments,
+                                      Pixel* g_accum,
+                                      int* g_counts,
+                                      int N, int K);
+
 static void rgb2lab(unsigned char R, unsigned char G, unsigned char B,
                     float &L, float &a, float &b)
 {
@@ -71,4 +104,3 @@ static void rgb2lab(unsigned char R, unsigned char G, unsigned char B,
     a = 500.f * (fx - fy);
     b = 200.f * (fy - fz);
 }
-

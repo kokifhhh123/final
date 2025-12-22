@@ -3,11 +3,11 @@
 #include <ctime>
 #include <cstring>
 #include <png.h>
-#include <chrono>      // CPU timing
+#include <chrono>          // CPU timing
 #include <cuda_runtime.h>  // CUDA timing
 #include "heds/algo.h"
+// #include "timing.h"
 
-// ------------ CPU timer helper ------------
 double now() {
     return std::chrono::duration<double>(
         std::chrono::high_resolution_clock::now().time_since_epoch()
@@ -16,13 +16,6 @@ double now() {
 
 
 int main(int argc, char* argv[]) {
-    // ./kmeans input.png output.png mode K [max_iters]
-    if (argc != 5 && argc != 6) {
-        std::cout << "Usage: ./kmeans input.png output.png "
-                     "(seq|omp|cuda|cuda_opt) K [max_iters]\n";
-        return 1;
-    }
-
     const char* input_path  = argv[1];
     const char* output_path = argv[2];
     const char* algo        = argv[3];
@@ -48,18 +41,14 @@ int main(int argc, char* argv[]) {
     double t0, t1;
     float cuda_ms;
 
-
     if (std::strcmp(algo, "kmeans") == 0) {
         if (std::strcmp(mode, "seq") == 0) {
-
             t0 = now();
             kmeans_seq(src, dst, K, max_iters);
             t1 = now();
             std::cout << "[SEQ] time = " << (t1 - t0) << " sec\n";
-
         }
         else if (std::strcmp(mode, "omp") == 0) {
-
             t0 = now();
             kmeans_omp(src, dst, K, max_iters);
             t1 = now();
@@ -98,6 +87,8 @@ int main(int argc, char* argv[]) {
 
             cudaEventDestroy(start);
             cudaEventDestroy(stop);
+            // KMeansTiming t = kmeans_cuda_opt_timed(src, dst, K, max_iters);
+            // print_kmeans_timing(t);
         }
         else if (std::strcmp(mode, "cuda_opt_warp") == 0) {
             cudaEvent_t start, stop;
@@ -115,6 +106,8 @@ int main(int argc, char* argv[]) {
 
             cudaEventDestroy(start);
             cudaEventDestroy(stop);
+            // KMeansTiming t = kmeans_cuda_warp_timed(src, dst, K, max_iters);
+            // print_kmeans_timing(t);
         }
         else {
             std::cerr << "Invalid mode: " << mode
@@ -132,7 +125,6 @@ int main(int argc, char* argv[]) {
             std::cout << "[SLIC-SEQ] time = " << (t1 - t0) << " sec\n";
         }
         else if (std::strcmp(mode, "omp") == 0) {
-            
             t0 = now();
             std::cout << "hello" << std::endl;
             slic_omp(src, dst, K, max_iters);
@@ -181,7 +173,6 @@ int main(int argc, char* argv[]) {
             return 1;
         }
     }
-    
     write_png(output_path, dst->data, height, width, channels);
     freeImage(src);
     freeImage(dst);
