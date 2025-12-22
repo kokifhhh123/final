@@ -1,8 +1,6 @@
 #include "heds/algo.h"
-
 #include <cmath>
 #include <vector>
-// #include <limits>
 #include <iostream>
 #include <cfloat>
 #include <omp.h>
@@ -52,7 +50,6 @@ void slic_seq(Image* src, Image* dst, int K, int max_iters)
 
     int Kactual = cL.size();
     std::vector<int> labels(N, -1);
-    std::vector<float> dist(N, FLT_MAX);
 
     const float m = 20.0f; 
     float inv_S2 = 1.0f / (S * S);
@@ -73,7 +70,6 @@ void slic_seq(Image* src, Image* dst, int K, int max_iters)
                 int gx = (int)(x / S);
                 int gy = (int)(y / S);
 
-                // 搜尋 3x3 Grid
                 for (int dy = -1; dy <= 1; ++dy) {
                     for (int dx = -1; dx <= 1; ++dx) {
                         int ngx = gx + dx;
@@ -81,7 +77,6 @@ void slic_seq(Image* src, Image* dst, int K, int max_iters)
 
                         if (ngx >= 0 && ngx < grid_w && ngy >= 0 && ngy < grid_h) {
                             int k = grid_to_k[ngy * grid_w + ngx];
-                            
                             if (k != -1) {
                                 float dL = l_i - cL[k];
                                 float dA = a_i - cA[k];
@@ -93,7 +88,6 @@ void slic_seq(Image* src, Image* dst, int K, int max_iters)
                                 float dspace = dX*dX + dY*dY;
 
                                 float D = dcolor + (dspace * inv_S2 * m2);
-
                                 if (D < min_D) {
                                     min_D = D;
                                     best_k = k;
@@ -156,7 +150,6 @@ void slic_seq(Image* src, Image* dst, int K, int max_iters)
             avgB[k] = (unsigned char)(sumB_out[k] / countPix[k]);
         }
     }
-
     for (int y = 0; y < H; ++y) {
         for (int x = 0; x < W; ++x) {
             size_t i = y * W + x;
@@ -196,6 +189,9 @@ void slic_seq(Image* src, Image* dst, int K, int max_iters)
         }
     }
 }
+
+
+
 
 void slic_omp(Image* src, Image* dst, int K, int max_iters)
 {
@@ -314,7 +310,7 @@ void slic_omp(Image* src, Image* dst, int K, int max_iters)
                     t_A[k] += A[i];
                     t_B[k] += B[i];
                     t_X[k] += (float)(i % W);
-                    t_Y[k] += (float)(i / W);
+                    t_Y[k] += (float)((float)i / W);
                     t_cnt[k]++;
                 }
             }
@@ -414,15 +410,7 @@ void slic_omp(Image* src, Image* dst, int K, int max_iters)
 
 
 
-#define CUDA_CHECK(call) \
-    do { \
-        cudaError_t err = call; \
-        if (err != cudaSuccess) { \
-            fprintf(stderr, "CUDA Error: %s at line %d\n", cudaGetErrorString(err), __LINE__); \
-            return; \
-        } \
-    } while (0)
-
+#define CUDA_CHECK(call) do { cudaError_t err = call; if (err != cudaSuccess) { fprintf(stderr, "CUDA Error: %s at line %d\n", cudaGetErrorString(err), __LINE__); return; } } while (0)
 
 __device__ void rgb2lab_gpu(unsigned char R, unsigned char G, unsigned char B,
                             float &L, float &a, float &b)
@@ -471,9 +459,6 @@ __global__ void k_rgb2lab(const unsigned char* __restrict__ src,
     d_A[idx] = A;
     d_B[idx] = B;
 }
-
-
-
 
 __global__ void k_update_centers(float* cL, float* cA, float* cB,
                                  float* cX, float* cY,
@@ -796,6 +781,7 @@ void slic_cuda(Image* src, Image* dst, int K, int max_iters)
 
 
 
+
 __global__ void k_assignment_opt(const float* __restrict__ d_L, 
                                  const float* __restrict__ d_A, 
                                  const float* __restrict__ d_B,
@@ -871,7 +857,6 @@ __global__ void k_assignment_opt(const float* __restrict__ d_L,
     d_labels[idx] = best_k;
 }
 
-
 __global__ void k_accumulate_opt(const float* __restrict__ d_L,
                                  const float* __restrict__ d_A,
                                  const float* __restrict__ d_B,
@@ -940,8 +925,7 @@ __global__ void k_accumulate_opt(const float* __restrict__ d_L,
     }
 }
 
-
-__global__ void k_accumulate_rgb_opt(const unsigned char* __restrict__ src,
+__global__ void k_reconstruct_opt(const unsigned char* __restrict__ src,
                                      const int* __restrict__ d_labels,
                                      float* sumR, float* sumG, float* sumB, int* count,
                                      int W, int H, int C, int Kactual)
@@ -1097,7 +1081,6 @@ void slic_cuda_opt(Image* src, Image* dst, int K, int max_iters)
     dim3 gridDim2D((W + 15) / 16, (H + 15) / 16);
 
     for (int iter = 0; iter < max_iters; ++iter) {
-        // Step A: Assignment (Pixel-Centric)
         k_assignment_opt<<<gridDim2D, blockDim2D>>>(d_L, d_A, d_B, 
                                                     d_cL, d_cA, d_cB, d_cX, d_cY, 
                                                     d_grid_to_k, d_labels,
@@ -1130,7 +1113,7 @@ void slic_cuda_opt(Image* src, Image* dst, int K, int max_iters)
     CUDA_CHECK(cudaMemset(d_sumB, 0, Kactual * sizeof(float)));
     CUDA_CHECK(cudaMemset(d_cntP, 0, Kactual * sizeof(int)));
 
-    k_accumulate_rgb_opt<<<gridDim2D, blockDim2D>>>(d_src, d_labels, d_sumR, d_sumG, d_sumB, d_cntP, W, H, C, Kactual);
+    k_reconstruct_opt<<<gridDim2D, blockDim2D>>>(d_src, d_labels, d_sumR, d_sumG, d_sumB, d_cntP, W, H, C, Kactual);
     CUDA_CHECK(cudaGetLastError());
 
     k_write_pixels<<<numBlocks, blockSize>>>(d_dst, d_labels, d_sumR, d_sumG, d_sumB, d_cntP, W, H, C, Kactual);

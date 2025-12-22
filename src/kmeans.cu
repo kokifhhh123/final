@@ -11,22 +11,6 @@
 #include <device_launch_parameters.h>
 #define MAX_K 128
 
-#define CHECK_CUDA(call)                                                      \
-    do {                                                                      \
-        cudaError_t err__ = (call);                                           \
-        if (err__ != cudaSuccess) {                                           \
-            std::cerr << "CUDA error " << __FILE__ << ":" << __LINE__        \
-                      << " : " << cudaGetErrorString(err__) << std::endl;     \
-            std::exit(1);                                                     \
-        }                                                                     \
-    } while (0)
-
-__device__ float distance2_dev(const Pixel &a, const Pixel &b) {
-    float dr = a.r - b.r;
-    float dg = a.g - b.g;
-    float db = a.b - b.b;
-    return dr*dr + dg*dg + db*db;
-}
 
 float distance2(const Pixel &a, const Pixel &b) {
     float dr = a.r - b.r;
@@ -34,7 +18,6 @@ float distance2(const Pixel &a, const Pixel &b) {
     float db = a.b - b.b;
     return dr*dr + dg*dg + db*db;
 }
-
 void kmeans_seq(Image* src, Image* dst, int K, int max_iters) {
     unsigned width = src->width;
     unsigned height = src->height;
@@ -110,8 +93,6 @@ void kmeans_seq(Image* src, Image* dst, int K, int max_iters) {
         }
     }
 }
-
-
 
 
 
@@ -212,7 +193,15 @@ void kmeans_omp(Image* src, Image* dst, int K, int max_iters) {
 
 
 
+#define CHECK_CUDA(call) \
+    do { cudaError_t err__ = (call); if (err__ != cudaSuccess) {std::cerr << "CUDA error " << __FILE__ << ":" << __LINE__ << " : " << cudaGetErrorString(err__) << std::endl; std::exit(1);}} while (0)
 
+__device__ float distance2_dev(const Pixel &a, const Pixel &b) {
+    float dr = a.r - b.r;
+    float dg = a.g - b.g;
+    float db = a.b - b.b;
+    return dr*dr + dg*dg + db*db;
+}
 
 __global__ void assign_kernel(const Pixel* pixels,
                               const Pixel* centroids,
@@ -382,7 +371,6 @@ __global__ void assign_kernel_opt(const Pixel* pixels,
     assignments[idx] = best_k;
 }
 
-
 __global__ void accumulate_kernel_opt(const Pixel* pixels,
                                       const int* assignments,
                                       Pixel* g_accum,
@@ -536,8 +524,6 @@ void kmeans_cuda_opt(Image* src, Image* dst, int K, int max_iters) {
     CHECK_CUDA(cudaFree(d_counts));
     CHECK_CUDA(cudaFree(d_assignments));
 }
-
-
 
 
 
